@@ -97,6 +97,9 @@ enum abstract GcOptions(Int) {
 #elseif cpp
 @:include("lua.hpp")
 @:buildXml("
+<copyFile name='lua51.dll' from='${haxelib:hxlua}/lib/${BINDIR}' overwrite='true' toolId='exe' if='windows'>
+<copyFile name='libluajit-5.1.so' from='${haxelib:hxlua}/lib/${BINDIR}' overwrite='true' toolId='exe' if='linux'>
+<copyFile name='libluajit-5.1.dylib' from='${haxelib:hxlua}/lib/${BINDIR}' overwrite='true' toolId='exe' if='mac'>
 <files id='haxe'>
             <compilerflag value='-I${haxelib:hxlua}/LuaJIT/src'/>
         </files>
@@ -104,6 +107,7 @@ enum abstract GcOptions(Int) {
 			<libpath name='${haxelib:hxlua}/lib/${BINDIR}'/>
             <lib base='lua51' if='windows'/>
 			<lib base='luajit-5.1' unless='windows'/>
+			<vflag name='-Wl,-rpath=$ORIGIN' value='' unless='windows'/>
 		</target>
 ")
 #end
