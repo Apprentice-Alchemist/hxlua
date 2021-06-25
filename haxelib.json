@@ -1,0 +1,12 @@
+{
+    "name": "hxlua",
+    "classPath": "src",
+    "license": "MIT",
+    "contributors": ["Apprentice-Alchemist"],
+    "dependencies": {},
+    "description": "Haxe bindings for LuaJIT",
+    "releasenote": "N/A",
+    "version": "0.0.0",
+    "tags": ["lua","luajit","native"],
+    "url": "https://github.com/Apprentice-Alchemist/hxlua"
+}
