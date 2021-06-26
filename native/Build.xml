@@ -1,0 +1,26 @@
+<xml>
+    <set name="HASHLINK_INCLUDE" value="${HASHLINK}/include" if="HASHLINK windows" unless="HASHLINK_INCLUDE"/>
+    <set name="HASHLINK_BIN" value="${HASHLINK}" if="HASHLINK windows" unless="HASHLINK_BIN"/>
+
+    <set name="HASHLINK_INCLUDE" value="${this_dir}/../hashlink/src" if="GITHUB_WORKSPACE"/>
+    <set name="HASHLINK_BIN" value="${this_dir}/../hashlink/x64/Release" if="GITHUB_WORKSPACE windows"/>
+    <set name="HASHLINK_BIN" value="${this_dir}/../hashlink" if="GITHUB_WORKSPACE" unless="HASHLINK_BIN"/>
+
+    <files id="lua">
+        <compilerflag value="-I${HASHLINK_INCLUDE}" if="HASHLINK_INCLUDE"/>
+        <compilerflag value='-I${this_dir}/../LuaJIT/src'/>
+        <file name="${this_dir}/lua.c" />
+    </files>
+
+    <target id="default" output="lua" toolid="dll" tool="linker">
+        <files id="lua"/>
+        <lib name='${haxelib:hxlua}/lib/${BINDIR}/lua51.lib' if='windows'/>
+	    <lib name='-lluajit-5.1.2.1.0' if='macos'/>
+        <lib name='-lluajit-5.1' if='linux'/>
+        <libpath name="${HASHLINK_BIN}" if="windows"/>
+        <libpath name="/usr/local/lib" if='macos'/>
+        <lib name="libhl.lib" if="windows"/>
+        <lib name="-lhl" unless="windows"/>
+        <ext value=".hdll"/>
+    </target>
+</xml>

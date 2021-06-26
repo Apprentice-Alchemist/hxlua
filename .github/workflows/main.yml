@@ -1,0 +1,94 @@
+name: Build
+
+on: [push]
+env:
+  MACOSX_DEPLOYMENT_TARGET: 10.15
+jobs:
+  build:
+    if: ${{ !contains(join(github.event.commits.*.message),'[skip ci]') }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    steps:
+    - name: Install Haxe
+      uses: krdlab/setup-haxe@master
+      with:
+          haxe-version: 4.2.0
+    - uses: ilammy/msvc-dev-cmd@v1
+      if: matrix.os == 'windows-latest'
+    - uses: actions/checkout@v2
+      with:
+        submodules: "recursive"
+    - name: Checkout hashlink
+      uses: actions/checkout@v2
+      with:
+        repository: "HaxeFoundation/hashlink"
+        path: "hashlink"
+    - name: Build LuaJIT
+      if: matrix.os != 'windows-latest'
+      run: |
+        cd LuaJIT
+        make && sudo make install
+    - name: Build LuaJIT Windows
+      if: matrix.os == 'windows-latest'
+      shell: cmd
+      run: |
+        cd LuaJIT/src
+        msvcbuild.bat
+        cd ../../
+        mkdir lib/Windows64
+        copy LuaJIT/src/lua51.dll lib/Windows64
+        copy LuaJIT/src/lua51.lib lib/Windows64
+    - name: Build Hashlink
+      if: matrix.os != 'windows-latest'
+      run: |
+        cd hashlink
+        make libhl
+        make hl
+        make ui
+        sudo make install
+    - name: Build Hashlink
+      if: matrix.os == 'windows-latest'
+      shell: cmd
+      run: |
+        cd hashlink
+        MSBuild libhl.vcxproj /nologo /clp:ErrorsOnly "-p:Configuration=Release;PlatformToolset=v142;WindowsTargetPlatformVersion=10"
+        MSBuild hl.vcxproj /nologo /clp:ErrorsOnly "-p:Configuration=Release;PlatformToolset=v142;WindowsTargetPlatformVersion=10"
+        echo %GITHUB_WORKSPACE%\hashlink\x64\Release >> %GITHUB_PATH%
+    - name: Setup
+      run: |
+        haxelib dev hxlua .
+        haxelib install hxcpp --quiet
+        cd native
+        haxelib run hxcpp Build.xml -DHXCPP_M64 -verbose
+    - name: Test
+      if: matrix.os == 'windows-latest'
+      shell: cmd
+      run: |
+        copy native\lua.hdll test\lua.hdll
+        cd test
+        haxe build.hxml -D HXCPP_M64
+        out\Main
+    - name: Test
+      if: matrix.os == 'macos-latest'
+      run: |
+        cp native/lua.hdll test/lua.hdll
+        cd test
+        haxe build.hxml -D HXCPP_M64
+        out/Main
+        hl out.hl
+    - name: Test
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        cp native/lua.hdll test/lua.hdll
+        cd test
+        haxe build.hxml -D HXCPP_M64
+        LD_LIBRARY_PATH=/usr/local/lib out/Main
+        LD_LIBRARY_PATH=/usr/local/lib hl out.hl
+    # - name: Upload Artifact
+    #   uses: 'actions/upload-artifact@v2'
+    #   with:
+    #     name: ${{ matrix.os }} ${{ matrix.graphics }}
+    #     path: kinc.hdll

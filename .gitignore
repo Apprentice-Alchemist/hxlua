@@ -1,3 +1,7 @@
 out/*
-Main.hx
-script.lua
+**/out/**
+.vscode/**
+*.hl
+native/obj/*
+native/lua.hdll
+native/lua.hdll.hash

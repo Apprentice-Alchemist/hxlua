@@ -1,21 +1,13 @@
 package;
 
-private abstract IntBool(Int) from Int to Int {
-	@:to function toBool():Bool {
-		return this != 0;
-	}
-
-	@:from static function fromBool(b:Bool):IntBool {
-		return b ? 1 : 0;
-	}
-}
+import haxe.Constraints.Function;
 
 #if hl
 abstract State(hl.Abstract<"lua_State">) {}
 
 private abstract CString(hl.Bytes) from hl.Bytes to hl.Bytes {
 	@:from static inline function fromString(s:String) {
-		return @:privateAccess s.toUTF8();
+		return @:privateAccess cast s.toUtf8();
 	}
 
 	@:to inline function toString():String {
@@ -27,6 +19,15 @@ private typedef Ref<T> = hl.Ref<T>;
 private typedef Bytes = hl.Bytes;
 private typedef LuaNumber = Float;
 private typedef LuaInteger = Int;
+
+@:callable
+private abstract Callable<T:Function>(T) to T {
+	@:from static function fromT<T:Function>(f:T) {
+		return cast hl.Api.noClosure(f);
+	}
+}
+
+private typedef IntBool = Bool;
 #elseif cpp
 @:include("lua.hpp")
 @:native("lua_State *")
@@ -52,10 +53,38 @@ private abstract Bytes(cpp.Star<Void>) {
 
 private typedef LuaNumber = Float;
 private typedef LuaInteger = cpp.Int64;
+private typedef Callable<T> = cpp.Callable<T>;
+
+private abstract IntBool(Int) from Int to Int {
+	@:to function toBool():Bool {
+		return this != 0;
+	}
+
+	@:from static function fromBool(b:Bool):IntBool {
+		return b ? 1 : 0;
+	}
+}
+
+private class Misc {
+	public static function writer(L:State, p:cpp.ConstStar<cpp.Void>, sz:cpp.SizeT, ud:cpp.Star<cpp.Void>):Int {
+		var func:(State, haxe.io.Bytes) -> Int = cast ud;
+		return func(L,haxe.io.Bytes.ofData(cpp.Pointer.fromStar(cast p).toUnmanagedArray(sz)));
+	}
+
+	public static function reader(L:State,ud:cpp.Star<cpp.Void>,sz:cpp.Star<cpp.SizeT>):cpp.ConstCharStar {
+		var func:(State)->haxe.io.Bytes = cast ud;
+		var b = func(L);
+		untyped __cpp__("*sz = {0}",b.length);
+		return cast cpp.Pointer.ofArray(b.getData()).constRaw;
+
+	}
+}
+#else
+#error "Unsupported platform"
 #end
-private typedef Reader = cpp.Callable<(state:State, size:Ref<Int>) -> Bytes>;
-private typedef Writer = cpp.Callable<(state:State, data:Bytes, size:Int) -> Int>;
-typedef LuaCFunction = cpp.Callable<State->Int>;
+// private typedef Reader = cpp.Callable<(state:State, size:Ref<Int>) -> Bytes>;
+// private typedef Writer = cpp.Callable<(state:State, data:Bytes, size:Int) -> Int>;
+typedef LuaCFunction = Callable<State->Int>;
 
 enum abstract LuaType(Int) {
 	var LUA_TNONE = -1;
@@ -93,25 +122,34 @@ enum abstract GcOptions(Int) {
 }
 
 #if hl
-@:hlNative("lua")
+@:hlNative("lua", "hl_")
 #elseif cpp
 @:include("lua.hpp")
 @:buildXml("
-<copyFile name='lua51.dll' from='${haxelib:hxlua}/lib/${BINDIR}' overwrite='true' toolId='exe' if='windows'>
-<copyFile name='libluajit-5.1.so' from='${haxelib:hxlua}/lib/${BINDIR}' overwrite='true' toolId='exe' if='linux'>
-<copyFile name='libluajit-5.1.dylib' from='${haxelib:hxlua}/lib/${BINDIR}' overwrite='true' toolId='exe' if='mac'>
+<copyFile name='lua51.dll' from='${haxelib:hxlua}/lib/${BINDIR}' overwrite='true' toolId='exe' if='windows'/>
 <files id='haxe'>
-            <compilerflag value='-I${haxelib:hxlua}/LuaJIT/src'/>
-        </files>
-		<target id='haxe'>
-			<libpath name='${haxelib:hxlua}/lib/${BINDIR}'/>
-            <lib base='lua51' if='windows'/>
-			<lib base='luajit-5.1' unless='windows'/>
-			<vflag name='-Wl,-rpath=$ORIGIN' value='' unless='windows'/>
-		</target>
+    <compilerflag value='-I${haxelib:hxlua}/LuaJIT/src'/>
+</files>
+<target id='haxe'>
+    <lib name='${haxelib:hxlua}/lib/${BINDIR}/lua51.lib' if='windows'/>
+	<libpath name='/usr/local/lib' if='macos'/>
+	<lib name='-lluajit-5.1.2.1.0' if='macos'/>
+    <lib name='-lluajit-5.1' if='linux'/>
+</target>
 ")
 #end
+#if hl
+@:build(Lua.gen())
+#end
 extern class Lua {
+	#if hl
+	@:hlNative("lua", "hl_init")
+	private static function init(t:hl.Type,t1:hl.Type):Void;
+	private static inline function __init__():Void {
+		init(hl.Type.get(((s:State) -> 0 : LuaCFunction)),hl.Type.get(haxe.io.Bytes.alloc(0)));
+	}
+	#end
+
 	static inline var MINSTACK = 20;
 	static inline var MULTRET = -1;
 	static inline var REGISTRYINDEX = -10000;
@@ -231,10 +269,26 @@ extern class Lua {
 	static function pcall(L:State, nargs:Int, nresults:Int, errfunc:Int):Int;
 	@:native("lua_cpcall")
 	static function cpcall<T:Dynamic>(L:State, func:LuaCFunction, ud:T):Int;
+	#if cpp
 	@:native("lua_load")
-	static function load(L:State, reader:Reader, dt:Bytes, chunkname:CString):Int;
+	private static function _load(L:State, reader:cpp.Callable<(State,cpp.Star<cpp.Void>,cpp.Star<cpp.SizeT>)->cpp.ConstCharStar>, dt:cpp.Star<cpp.Void>, chunkname:CString):Int;
+	static inline function load(L:State,reader:(State)->haxe.io.Bytes,chunkname:String):Int {
+		return _load(L,cpp.Callable.fromStaticFunction(Misc.reader),cast reader,chunkname);
+	}
+	#elseif hl
+	@:skipHL
+	static function load(L:State, reader:State->haxe.io.Bytes, chunkname:CString):Int;
+	#end
+	#if cpp
 	@:native("lua_dump")
-	static function dump(L:State, writer:Writer, data:Bytes):Int;
+	private static function _dump(L:State,writer:cpp.Callable<(State,cpp.ConstStar<cpp.Void>,cpp.SizeT,cpp.Star<cpp.Void>)->Int>,ud:cpp.Star<cpp.Void>):Int;
+	static inline function dump(L:State,writer:(State,haxe.io.Bytes)->Int):Int {
+		return _dump(L,cpp.Callable.fromStaticFunction(Misc.writer),cast writer);
+	}
+	#elseif hl
+	@:skipHL
+	static function dump(L:State, writer:(State,haxe.io.Bytes)->Int):Int;
+	#end
 	@:native("lua_yield")
 	static function yield(L:State, nresults:Int):ThreadStatus;
 	@:native("lua_resume")
@@ -311,57 +365,54 @@ extern class Lua {
 		tolstring(L, i, null);
 	}
 
-	@:native("lua_setlevel")
-	static function setlevel(from:State, to:State):Void;
+	// @:native("lua_setlevel")
+	// static function setlevel(from:State, to:State):Void;
 	@:native("luaL_openlibs")
 	static function openlibs(L:State):Void;
 	@:native("luaL_loadfile")
 	static function loadfile(L:State, filename:CString):Int;
 
-	static inline function dofile(L:State,f:String):Bool {
-		return loadfile(L,f) == 1 && pcall(L,0,MULTRET,0) == 1;
+	static inline function dofile(L:State, f:String):Bool {
+		return loadfile(L, f) == 1 && pcall(L, 0, MULTRET, 0) == 1;
 	}
-
 }
 
-@:hlNative("lua","hl_open_")
+@:hlNative("lua", "hl_open_")
 @:include("lua.hpp")
 extern class LuaOpen {
-	static inline var LUA_COLIBNAME = "coroutine";
-	static inline var LUA_MATHLIBNAME = "math";
-	static inline var LUA_STRLIBNAME = "string";
-	static inline var LUA_TABLIBNAME = "table";
-	static inline var LUA_IOLIBNAME = "io";
-	static inline var LUA_OSLIBNAME = "os";
-	static inline var LUA_LOADLIBNAME = "package";
-	static inline var LUA_DBLIBNAME = "debug";
-	static inline var LUA_BITLIBNAME = "bit";
-	static inline var LUA_JITLIBNAME = "jit";
-	static inline var LUA_FFILIBNAME = "ffi";
-
-    @:native("luaopen_base")
-    static function base(L:State):Void;
-
-	@:native("luaopen_math")
-	static function math(L:State):Void;
-	@:native("luaopen_string")
-	static function string(L:State):Void;
-	@:native("luaopen_table")
-	static function table(L:State):Void;
-	@:native("luaopen_io")
-	static function io(L:State):Void;
-	@:native("luaopen_os")
-	static function os(L:State):Void;
-	@:native("luaopen_package")
-	static function _package(L:State):Void;
-	@:native("luaopen_debug")
-	static function debug(L:State):Void;
-	@:native("luaopen_bit")
-	static function bit(L:State):Void;
-	@:native("luaopen_jit")
-	static function jit(L:State):Void;
-	@:native("luaopen_ffi")
-	static function ffi(L:State):Void;
-	@:native("luaopen_string_buffer")
-	static function string_buffer(L:State):Void;
+	// static inline var LUA_COLIBNAME = "coroutine";
+	// static inline var LUA_MATHLIBNAME = "math";
+	// static inline var LUA_STRLIBNAME = "string";
+	// static inline var LUA_TABLIBNAME = "table";
+	// static inline var LUA_IOLIBNAME = "io";
+	// static inline var LUA_OSLIBNAME = "os";
+	// static inline var LUA_LOADLIBNAME = "package";
+	// static inline var LUA_DBLIBNAME = "debug";
+	// static inline var LUA_BITLIBNAME = "bit";
+	// static inline var LUA_JITLIBNAME = "jit";
+	// static inline var LUA_FFILIBNAME = "ffi";
+	// @:native("luaopen_base")
+	// static function base(L:State):Void;
+	// @:native("luaopen_math")
+	// static function math(L:State):Void;
+	// @:native("luaopen_string")
+	// static function string(L:State):Void;
+	// @:native("luaopen_table")
+	// static function table(L:State):Void;
+	// @:native("luaopen_io")
+	// static function io(L:State):Void;
+	// @:native("luaopen_os")
+	// static function os(L:State):Void;
+	// @:native("luaopen_package")
+	// static function _package(L:State):Void;
+	// @:native("luaopen_debug")
+	// static function debug(L:State):Void;
+	// @:native("luaopen_bit")
+	// static function bit(L:State):Void;
+	// @:native("luaopen_jit")
+	// static function jit(L:State):Void;
+	// @:native("luaopen_ffi")
+	// static function ffi(L:State):Void;
+	// @:native("luaopen_string_buffer")
+	// static function string_buffer(L:State):Void;
 }

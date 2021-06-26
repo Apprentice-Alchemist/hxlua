@@ -1,0 +1,8 @@
+-lib hxlua
+-m Main
+-dce full
+--each
+-cpp out
+-D HXCPP_M64
+--next
+-hl out.hl
